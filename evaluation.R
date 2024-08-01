@@ -1,4 +1,3 @@
-# fix mboost rank
 library(ggpubr)
 library(tidyverse)
 library(tree)
@@ -252,7 +251,7 @@ cor_rank_tune <- round(cor(df[str_detect(df$model, 'tune'),]$rank,
 
 # scatterplot
 df %>% 
-  mutate(tuned = case_when(str_detect(model, 'tune')~ 'Tunded models', T ~'All models'),
+  mutate(tuned = case_when(str_detect(model, 'tune')~ 'Tuned models', T ~'All models'),
          label= case_when(!str_detect(model, 'tune')~
                             paste0('cor: ', log_cor_params_all,'\n', 'rank cor: ', cor_rank_all),
                           T ~ paste0('cor: ', log_cor_params_tune,'\n', 'rank cor: ', cor_rank_tune))) %>%
@@ -412,76 +411,88 @@ df %>%
 #   theme(axis.text.x = element_text(angle = 45, hjust=1))
 # ggsave('Figures/cor_parallel.png', width = 7, height = 5)
 
-# models univariate
-model_df <- df %>% mutate(city = as.factor(city))
-lm(cor ~ rank, data = df) %>%
-  summary()
-# lm(cor ~ params, data = df) %>%
-#   summary()
-lm(cor ~ log(params), data = df) %>%
-  summary()
-lm(cor ~ rank + log(params), data = df) %>%
-  summary()
-
-# lm(cor ~ rank*interpretability , data = df) %>%
-#   summary()
-# lm(cor ~ params*interpretability, data = df) %>%
-#   summary()
-# lm(cor ~ log(params)*interpretability, data = df) %>%
-#   summary()
-
-# with interpretability interaction
-lm(cor ~ rank*interpretability + log(params)*interpretability, data = df) %>%
-  summary()
-
-
-# only tune
-lm(cor ~ rank, data = df %>% filter(str_detect(model,'tune'))) %>%
-  summary()
-lm(cor ~ log(params), data = df %>% filter(str_detect(model,'tune'))) %>%
-  summary()
-lm(cor ~ rank + log(params), data = df %>% filter(str_detect(model,'tune'))) %>%
-  summary()
-
-lm(cor ~ rank*interpretability + log(params)*interpretability, 
-   data = df %>% filter(str_detect(model,'tune'))) %>%
-  summary()
-
-# and for each interpretability
-lm(cor ~ rank , 
-   data = df %>% filter(str_detect(model,'tune'), interpretability)) %>%
-  summary()
-lm(cor ~ rank , 
-   data = df %>% filter(str_detect(model,'tune'), !interpretability)) %>%
-  summary()
-lm(cor ~ log(params) , 
-   data = df %>% filter(str_detect(model,'tune'), interpretability)) %>%
-  summary()
-lm(cor ~ log(params) , 
-   data = df %>% filter(str_detect(model,'tune'), !interpretability)) %>%
-  summary()
-
-# interpretability interaction
-
-# random effects for year and city univariate
-gam_mod <- gam(data = model_df, 
-               formula = cor ~ log(params) + s(city, bs = 're') + s(year, bs = 're'),
-               method="REML", family = 'gaussian')
-summary(gam_mod)
-gam_mod_rank <- gam(data = df, 
-               formula = cor ~ rank + s(city, bs = 're') + s(year, bs = 're'),
-               method="REML", family = 'gaussian')
-summary(gam_mod_rank)
-
+# models
 # within model (same results)
-within_mod <- gam(data = df, 
-                    formula = cor ~ log(params)*interpretability + rank*interpretability + s(model_type, bs = 're') + s(city, bs = 're') + s(year, bs = 're'),
-                    method="REML", family = 'gaussian')
 
-# only tune models
-tune_mod <- gam(data = df %>% filter(str_detect(model,'tune')), 
-                  formula = cor ~ log(params)*interpretability + rank*interpretability + s(city, bs = 're') + s(year, bs = 're'),
+interpretability_mod_1 <- gam(data = df %>% filter(model != 'lm', interpretability) %>% mutate(model_type = as.factor(model_type)), 
+                  formula = cor ~ rank + s(model_type, bs = 're'),
+                  method="REML", family = 'gaussian')
+summary(interpretability_mod_1)
+interpretability_mod_2 <- gam(data = df %>% filter(model != 'lm', !interpretability) %>% mutate(model_type = as.factor(model_type)), 
+                              formula = cor ~ rank + s(model_type, bs = 're'),
+                              method="REML", family = 'gaussian')
+summary(interpretability_mod_2)
+
+
+global_mod_1 <- gam(data = df %>% mutate(model_type = as.factor(model_type)) %>% filter(interpretability), 
+                  formula = cor ~  rank,
+                  method="REML", family = 'gaussian')
+summary(global_mod_1)
+global_mod_2 <- gam(data = df %>% mutate(model_type = as.factor(model_type)) %>% filter(!interpretability), 
+                    formula = cor ~  rank,
+                    method="REML", family = 'gaussian')
+summary(global_mod_2)
+
+
+params_mod_1 <- gam(data = df%>% mutate(model_type = as.factor(model_type)) %>% filter(interpretability), 
+                  formula = cor ~  log(params) ,
                   method="REML", family = 'gaussian')
 
+params_mod_1 %>% summary()
 
-summary(tune_mod)
+params_mod_2 <- gam(data = df %>% mutate(model_type = as.factor(model_type)) %>% filter(!interpretability), 
+                    formula = cor ~  log(params) ,
+                    method="REML", family = 'gaussian')
+
+params_mod_2 %>% summary()
+
+#### Interactions
+gam(data = df %>% filter(model != 'lm') %>% mutate(model_type = as.factor(model_type)), 
+    formula = cor ~ rank*interpretability + s(model_type, bs = 're'),
+    method="REML", family = 'gaussian') %>% summary()
+
+gam(data = df %>% mutate(model_type = as.factor(model_type)), 
+    formula = cor ~  rank*interpretability,
+    method="REML", family = 'gaussian') %>% summary()
+
+
+gam(data = df%>% mutate(model_type = as.factor(model_type)), 
+    formula = cor ~  log(params)*interpretability ,
+    method="REML", family = 'gaussian') %>% summary()
+####
+
+
+# models figure
+
+plotdata <- summary(interpretability_mod_1)$p.table %>% as.data.frame() %>% rownames_to_column() %>% mutate(model = 'Within-model Interpretability scale', type = 'Interpretable') %>%
+  bind_rows(
+    summary(interpretability_mod_2)$p.table %>% as.data.frame() %>% rownames_to_column() %>% mutate(model = 'Within-model Interpretability scale', type = 'Not interpretable')
+  ) %>% 
+  bind_rows(
+    summary(global_mod_1)$p.table %>% as.data.frame() %>% rownames_to_column() %>% mutate(model = 'Interpretability scale', type = 'Interpretable')
+  ) %>% 
+  bind_rows(
+    summary(global_mod_2)$p.table %>% as.data.frame() %>% rownames_to_column() %>% mutate(model = 'Interpretability scale', type = 'Not interpretable')
+  ) %>% 
+  bind_rows(
+    summary(params_mod_1)$p.table %>% as.data.frame() %>% rownames_to_column() %>% mutate(model = 'Parameters (log)', type = 'Interpretable')
+  ) %>%
+  bind_rows(
+    summary(params_mod_2)$p.table %>% as.data.frame() %>% rownames_to_column() %>% mutate(model = 'Parameters (log)', type = 'Not interpretable')
+  ) %>%
+  mutate_if(is.numeric, function(x){round(x,4)}) %>%
+  View()
+  
+plotdata %>%
+  mutate(lower = Estimate-1.96*`Std. Error`, upper = Estimate+1.96*`Std. Error`) %>%
+  filter(rowname != '(Intercept)') %>%
+  ggplot(aes(x = factor(model,levels = c('Interpretability scale', 'Within-model Interpretability scale','Parameters (log)')), color = as.factor(type), fill = as.factor(type), y = Estimate,ymin=lower, ymax=upper)) +
+  geom_errorbar(aes(color = as.factor(type)), position=position_dodge(width=0.6), width = 0.2) + 
+  geom_point(position=position_dodge(width=0.6), shape=21, size=2) +
+  geom_hline(yintercept = 0, linetype='dashed', size = 0.1,
+             col = 'black') +
+  theme_bw(base_size = 12) + #ylim(c(-2.6,2.6)) + 
+  xlab('') + ylab('Estimate') + ylim(c(-0.015,0.015)) + 
+  theme(legend.title = element_blank(),axis.text.x = element_text(angle = 30, vjust = 1, hjust=1)) + scale_color_manual(values = c("#999999", "#E69F00")) + scale_fill_manual(values = c("#999999", "#E69F00"))
+ggsave('Figures/estimates.png', dpi = 900, width = 7, height = 5)
+
